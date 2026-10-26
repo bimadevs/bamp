@@ -1,4 +1,4 @@
-name: Release BAMP & Build ISO
+name: Release BAMP (Windows .exe & Linux .AppImage)
 
 on:
   push:
@@ -15,15 +15,15 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build BAMP Linux & ISO Image
+  build-linux:
+    name: Build Linux (.AppImage & .deb)
     runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: Install Linux dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -36,7 +36,8 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            xorriso
+            libfuse2 \
+            patchelf
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -63,38 +64,120 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
-      - name: Build Tauri application & bundles
+      - name: Build Tauri AppImage & deb
         run: |
-          # Build release binary and packages (deb/appimage)
-          pnpm tauri build
+          pnpm tauri build --bundles appimage,deb
 
-      - name: Build ISO Distribution
+      - name: Collect Linux artifacts
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "master" ] || [ "$VERSION" = "main" ]; then
-            VERSION="${{ inputs.version || '0.1.0' }}"
+          mkdir -p artifacts-linux
+          # Copy .AppImage and .deb
+          find src-tauri/target/release/bundle/ -type f \( -name "*.AppImage" -o -name "*.deb" \) -exec cp {} artifacts-linux/ \; 2>/dev/null || true
+          # Also copy standalone binary
+          if [ -f src-tauri/target/release/bamp ]; then
+            cp src-tauri/target/release/bamp artifacts-linux/bamp-linux-x86_64
           fi
+          ls -lah artifacts-linux/
 
-          echo "Building ISO for version: ${VERSION}"
-          chmod +x scripts/build-iso.sh
-          ./scripts/build-iso.sh "${VERSION}"
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bamp-linux
+          path: artifacts-linux/*
+          if-no-files-found: error
 
-      - name: Prepare release files
+  build-windows:
+    name: Build Windows (.exe & .msi)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Build Tauri Windows installer (.exe & .msi)
         run: |
-          mkdir -p release-dist
-          cp dist/*.iso* release-dist/ 2>/dev/null || true
-          find src-tauri/target/release/bundle/ -type f \( -name "*.deb" -o -name "*.AppImage" \) -exec cp {} release-dist/ \; 2>/dev/null || true
-          ls -lah release-dist/
+          pnpm tauri build --bundles nsis,msi
 
-      - name: Publish to GitHub Release
+      - name: Collect Windows artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts-windows
+          # Copy NSIS .exe installers and MSI packages
+          find src-tauri/target/release/bundle/ -type f \( -name "*.exe" -o -name "*.msi" \) -exec cp {} artifacts-windows/ \; 2>/dev/null || true
+          # Also copy standalone bamp.exe if available
+          if [ -f src-tauri/target/release/bamp.exe ]; then
+            cp src-tauri/target/release/bamp.exe artifacts-windows/bamp-windows-x86_64.exe
+          fi
+          ls -lah artifacts-windows/
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bamp-windows
+          path: artifacts-windows/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish to GitHub Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256 Checksums
+        run: |
+          cd release-assets
+          ls -lah
+          sha256sum * > SHA256SUMS.txt 2>/dev/null || true
+          cat SHA256SUMS.txt
+
+      - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.version || '0.1.0') }}
           name: BAMP Release ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.version || '0.1.0') }}
           draft: false
           prerelease: false
-          files: release-dist/*
+          files: release-assets/*
+          body: |
+            ## BAMP: Ultra-Lightweight Modern Local Development Stack Manager
+
+            ### 📦 Download Packages
+            - **Windows**: Download the `.exe` installer (e.g. `bamp_*_x64-setup.exe` or `bamp-windows-x86_64.exe`)
+            - **Linux**: Download the `.AppImage` (make executable with `chmod +x` and run) or `.deb` package
+
+            ### 🛡️ Checksums
+            See `SHA256SUMS.txt` attached below for package verification.
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
