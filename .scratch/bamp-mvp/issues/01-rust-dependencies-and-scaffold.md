@@ -1,6 +1,6 @@
 # 01 - Rust Backend Scaffolding & Dependencies
 
-Status: ready-for-agent
+Status: resolved
 
 ## Goal
 Configure `src-tauri/Cargo.toml` with the required crates for async runtime, socket handling, file watching, and SSL generation, and establish the Rust module hierarchy.
@@ -23,6 +23,10 @@ Configure `src-tauri/Cargo.toml` with the required crates for async runtime, soc
 3. Wire modules into `src-tauri/src/lib.rs`.
 
 ## Completion Criteria
-- `cargo check` inside `src-tauri` succeeds with zero errors.
+- [x] `cargo check` inside `src-tauri` succeeds with zero errors.
 
 ## Comments
+- Dependencies added to `src-tauri/Cargo.toml` (`tokio`, `notify`, `rcgen`, `serde`, `serde_json`, `tauri` with `tray-icon`).
+- Module files created for `supervisor`, `dns`, `ssl`, `config`, `inspector`, and `platform`.
+- Modules exported in `src-tauri/src/lib.rs`.
+- Verified with `cargo check --manifest-path src-tauri/Cargo.toml` (0 errors, build successful).
