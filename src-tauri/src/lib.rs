@@ -8,6 +8,9 @@ pub mod supervisor;
 use std::collections::HashMap;
 use std::sync::Arc;
 use supervisor::{ProcessSupervisor, ServiceDefinition, ServiceState, StackStatus};
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::TrayIconBuilder;
+use tauri::Manager;
 
 #[tauri::command]
 fn start_service(
@@ -179,13 +182,62 @@ pub fn run() {
         .manage(supervisor)
         .manage(config_manager)
         .plugin(tauri_plugin_opener::init())
-        .setup(|_app| {
+        .setup(|app| {
             let dns_server = dns::DnsServer::new();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = dns_server.start(53).await {
                     eprintln!("DNS Server Warning: {}", e);
                 }
             });
+
+            // Build System Tray Menu
+            let open_dash = MenuItemBuilder::with_id("open_dash", "Open BAMP Dashboard").build(app)?;
+            let open_www = MenuItemBuilder::with_id("open_www", "Open www folder").build(app)?;
+            let start_all = MenuItemBuilder::with_id("start_all", "Start All Services").build(app)?;
+            let stop_all = MenuItemBuilder::with_id("stop_all", "Stop All Services").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit BAMP").build(app)?;
+
+            let tray_menu = MenuBuilder::new(app)
+                .items(&[&open_dash, &open_www, &start_all, &stop_all, &quit])
+                .build()?;
+
+            let mut tray_builder = TrayIconBuilder::new()
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(move |app_handle, event| match event.id().as_ref() {
+                    "open_dash" => {
+                        if let Some(w) = app_handle.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "open_www" => {
+                        let base = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                        let www = base.join("www");
+                        let _ = std::process::Command::new("xdg-open").arg(www).spawn();
+                    }
+                    "start_all" => {
+                        if let Some(s) = app_handle.try_state::<Arc<ProcessSupervisor>>() {
+                            let _ = s.start_all_services();
+                        }
+                    }
+                    "stop_all" => {
+                        if let Some(s) = app_handle.try_state::<Arc<ProcessSupervisor>>() {
+                            let _ = s.stop_all_services();
+                        }
+                    }
+                    "quit" => {
+                        app_handle.exit(0);
+                    }
+                    _ => (),
+                });
+
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+
+            let _tray = tray_builder.build(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
