@@ -54,6 +54,12 @@ fn get_stack_status(
     Ok(supervisor.get_stack_status())
 }
 
+#[tauri::command]
+fn sync_hosts(domains: Vec<String>) -> Result<(), String> {
+    let domain_refs: Vec<&str> = domains.iter().map(|s| s.as_str()).collect();
+    dns::HostsManager::sync_domains(&domain_refs)
+}
+
 pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let supervisor = Arc::new(ProcessSupervisor::new(base_dir));
@@ -131,13 +137,23 @@ pub fn run() {
     tauri::Builder::default()
         .manage(supervisor)
         .plugin(tauri_plugin_opener::init())
+        .setup(|_app| {
+            let dns_server = dns::DnsServer::new();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = dns_server.start(53).await {
+                    eprintln!("DNS Server Warning: {}", e);
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             start_service,
             stop_service,
             restart_service,
             start_all_services,
             stop_all_services,
-            get_stack_status
+            get_stack_status,
+            sync_hosts
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
