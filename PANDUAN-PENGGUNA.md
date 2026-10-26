@@ -11,11 +11,12 @@ Panduan ini dibuat khusus untuk Anda yang baru mulai belajar pemrograman web (co
 2. [Cara Menjalankan BAMP](#2-cara-menjalankan-bamp)
 3. [Mengenal Tampilan Aplikasi BAMP](#3-mengenal-tampilan-aplikasi-bamp)
 4. [Langkah Demi Langkah: Membuat Website Pertama Anda](#4-langkah-demi-langkah-membuat-website-pertama-anda)
-5. [Mengelola Database dengan Adminer](#5-mengelola-database-dengan-adminer)
-6. [Melihat Hasil Kirim Email dengan Mailpit](#6-melihat-hasil-kirim-email-dengan-mailpit)
-7. [Mengaktifkan HTTPS (Gembok Hijau)](#7-mengaktifkan-https-gembok-hijau)
-8. [Tips & Tombol Pintas (Shortcut)](#8-tips--tombol-pintas-shortcut)
-9. [Solusi Masalah Umum (Troubleshooting)](#9-solusi-masalah-umum-troubleshooting)
+5. [Cara Mengatur dan Mengganti Versi PHP](#5-cara-mengatur-dan-mengganti-versi-php)
+6. [Mengelola Database dengan Adminer](#6-mengelola-database-dengan-adminer)
+7. [Melihat Hasil Kirim Email dengan Mailpit](#7-melihat-hasil-kirim-email-dengan-mailpit)
+8. [Mengaktifkan HTTPS (Gembok Hijau)](#8-mengaktifkan-https-gembok-hijau)
+9. [Tips & Tombol Pintas (Shortcut)](#9-tips--tombol-pintas-shortcut)
+10. [Solusi Masalah Umum (Troubleshooting)](#10-solusi-masalah-umum-troubleshooting)
 
 ---
 
@@ -113,7 +114,30 @@ Klik tombol **Start All** di bar atas. Pastikan lampu indikator berubah menjadi 
 
 ---
 
-## 5. Mengelola Database dengan Adminer
+## 5. Cara Mengatur dan Mengganti Versi PHP
+
+Salah satu keunggulan terbesar BAMP adalah **kemampuan mengatur versi PHP secara instan untuk tiap-tiap proyek website**. Anda bisa menjalankan proyek Laravel modern dengan PHP 8.3/8.4 berdampingan dengan proyek lama yang masih membutuhkan PHP 7.4.
+
+### 5.1 Mengubah Versi PHP di Dashboard
+1. Buka jendela aplikasi BAMP.
+2. Lihat ke bagian **Virtual Hosts & Proyek** di tabel bagian bawah.
+3. Pada kolom **PHP**, Anda akan melihat sebuah menu pilihan (*dropdown*) di samping nama proyek Anda.
+4. Klik menu dropdown tersebut, lalu pilih versi PHP yang Anda inginkan (misalnya `php-8.3`, `php-8.2`, `php-7.4`, atau `default (System)`).
+5. Konfigurasi website tersebut akan diperbarui secara otomatis dan langsung aktif seketika tanpa perlu mematikan komponen server lain!
+
+### 5.2 Cara Menambahkan Versi PHP Baru ke BAMP
+BAMP menggunakan arsitektur folder portabel yang sangat rapi:
+1. Buka folder `bin/php` di dalam direktori aplikasi BAMP Anda.
+2. Jika Anda mengunduh binary PHP versi lain (misal dari situs resmi PHP), cukup ekstrak dan letakkan foldernya di sana, misalnya:
+   ```
+   bin/php/php-8.3/
+   bin/php/php-7.4/
+   ```
+3. BAMP secara otomatis akan mendeteksi folder tersebut dan memunculkannya di menu pilihan dropdown dashboard.
+
+---
+
+## 6. Mengelola Database dengan Adminer
 
 Jika website Anda membutuhkan database (seperti untuk form pendaftaran akun atau toko online):
 
@@ -149,7 +173,7 @@ echo "Berhasil terhubung ke database!";
 
 ---
 
-## 6. Melihat Hasil Kirim Email dengan Mailpit
+## 7. Melihat Hasil Kirim Email dengan Mailpit
 
 Saat belajar membuat form lupa password atau aktivasi email, seringkali pemula bingung bagaimana cara mengetesnya tanpa akun email sungguhan. BAMP sudah menyediakan **Mailpit**!
 
@@ -175,7 +199,7 @@ Saat belajar membuat form lupa password atau aktivasi email, seringkali pemula b
 
 ---
 
-## 7. Mengaktifkan HTTPS (Gembok Hijau)
+## 8. Mengaktifkan HTTPS (Gembok Hijau)
 
 BAMP secara otomatis membuatkan sertifikat keamanan SSL untuk semua domain `*.test` Anda.
 Agar browser Anda (Chrome, Firefox, Edge) menampilkan lambang gembok aman hijau tanpa peringatan:
@@ -190,7 +214,7 @@ Agar browser Anda (Chrome, Firefox, Edge) menampilkan lambang gembok aman hijau 
 
 ---
 
-## 8. Tips & Tombol Pintas (Shortcut)
+## 9. Tips & Tombol Pintas (Shortcut)
 
 - **Pencarian Kilat (`Ctrl + K` atau `Cmd + K`)**:
   Tekan `Ctrl+K` kapan saja di keyboard Anda. Sebuah jendela pencarian akan muncul. Anda bisa mengetik nama proyek untuk langsung membukanya tanpa perlu mencarinya secara manual.
@@ -205,7 +229,7 @@ Agar browser Anda (Chrome, Firefox, Edge) menampilkan lambang gembok aman hijau 
 
 ---
 
-## 9. Solusi Masalah Umum (Troubleshooting)
+## 10. Solusi Masalah Umum (Troubleshooting)
 
 ### Q: Status MySQL atau Nginx/Apache berwarna Kuning (Conflict)?
 **Penyebab**: Komputer Anda mungkin sudah memiliki aplikasi web server atau database lain yang sedang aktif di latar belakang (misalnya XAMPP lain, MariaDB bawaan Linux, Skype, atau IIS Windows).

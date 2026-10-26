@@ -55,6 +55,7 @@ export default function App() {
     services: {},
   });
   const [sites, setSites] = useState<Site[]>([]);
+  const [availablePhpVersions, setAvailablePhpVersions] = useState<string[]>(["default"]);
   const [logs, setLogs] = useState<Array<{ id: string; time: string; level: string; msg: string; service: string }>>([]);
   const [selectedLogFilter, setSelectedLogFilter] = useState("all");
   const [isLogOpen, setIsLogOpen] = useState(false);
@@ -95,9 +96,30 @@ export default function App() {
     }
   };
 
+  const fetchPhpVersions = async () => {
+    try {
+      const vers = await invoke<string[]>("get_available_php_versions");
+      setAvailablePhpVersions(vers);
+    } catch (e) {
+      console.error("Failed to get PHP versions:", e);
+    }
+  };
+
+  const handleSetSitePhpVersion = async (siteId: string, version: string) => {
+    try {
+      const updated = await invoke<Site>("set_site_php_version", { siteId, phpVersion: version });
+      setSites((prev) => prev.map((s) => (s.id === siteId ? updated : s)));
+      showToast(`PHP version for ${updated.domain} set to ${version}`);
+      addLog("config", `Updated ${updated.domain} to ${version}`, "info");
+    } catch (err: unknown) {
+      showToast(`Error changing PHP version: ${String(err)}`);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchSites();
+    fetchPhpVersions();
     addLog("system", "BAMP Developer Dashboard initialized.", "info");
 
     const timer = setInterval(() => {
@@ -517,7 +539,19 @@ export default function App() {
                       <td className="py-3 px-4 text-[var(--color-text-secondary)] font-mono text-[11px] truncate max-w-xs">
                         {site.documentRoot}
                       </td>
-                      <td className="py-3 px-4 text-[var(--color-text-secondary)]">{site.phpVersion}</td>
+                      <td className="py-3 px-4">
+                        <select
+                          value={site.phpVersion}
+                          onChange={(e) => handleSetSitePhpVersion(site.id, e.target.value)}
+                          className="bg-[var(--color-bg-subtle)] text-xs text-white border border-[var(--color-border)] rounded px-2 py-1 outline-none hover:border-[var(--color-primary)] transition-colors cursor-pointer"
+                        >
+                          {availablePhpVersions.map((v) => (
+                            <option key={v} value={v} className="bg-[var(--color-bg-surface)] text-white">
+                              {v === "default" ? "default (System)" : v}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="py-3 px-4">
                         {site.hasSsl ? (
                           <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">

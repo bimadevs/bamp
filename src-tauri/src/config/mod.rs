@@ -25,6 +25,7 @@ pub struct ConfigManager {
     base_dir: PathBuf,
     linked_folders: Mutex<Vec<PathBuf>>,
     cached_sites: Mutex<Vec<Site>>,
+    site_php_overrides: Mutex<HashMap<String, String>>,
 }
 
 impl ConfigManager {
@@ -33,7 +34,40 @@ impl ConfigManager {
             base_dir,
             linked_folders: Mutex::new(Vec::new()),
             cached_sites: Mutex::new(Vec::new()),
+            site_php_overrides: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub fn get_available_php_versions(&self) -> Vec<String> {
+        let mut versions = vec!["default".to_string()];
+        let php_bin_dir = self.base_dir.join("bin").join("php");
+        if let Ok(entries) = fs::read_dir(php_bin_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !name.starts_with('.') && !versions.contains(&name) {
+                    versions.push(name);
+                }
+            }
+        }
+        for common in &["php-8.4", "php-8.3", "php-8.2", "php-7.4"] {
+            if !versions.contains(&common.to_string()) {
+                versions.push(common.to_string());
+            }
+        }
+        versions
+    }
+
+    pub fn set_site_php_version(&self, site_id: &str, php_version: &str) -> Result<Site, String> {
+        {
+            let mut overrides = self.site_php_overrides.lock().unwrap();
+            overrides.insert(site_id.to_string(), php_version.to_string());
+        }
+        self.render_all_configs()?;
+        let sites = self.get_sites();
+        sites
+            .into_iter()
+            .find(|s| s.id == site_id)
+            .ok_or_else(|| format!("Site {} not found", site_id))
     }
 
     pub fn add_linked_folder(&self, path: PathBuf) -> Result<Vec<Site>, String> {
@@ -87,13 +121,19 @@ impl ConfigManager {
                             path.clone()
                         };
 
+                        let site_id = format!("site_{}", folder_name);
+                        let php_version = {
+                            let overrides = self.site_php_overrides.lock().unwrap();
+                            overrides.get(&site_id).cloned().unwrap_or_else(|| "default".to_string())
+                        };
+
                         let site = Site {
-                            id: format!("site_{}", folder_name),
+                            id: site_id,
                             name: folder_name,
                             domain: sanitized_domain,
                             path: path.to_string_lossy().to_string(),
                             document_root: doc_root.to_string_lossy().to_string(),
-                            php_version: "default".to_string(),
+                            php_version,
                             has_ssl: cert_exists,
                             status: "active".to_string(),
                         };

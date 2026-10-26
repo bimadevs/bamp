@@ -95,6 +95,22 @@ fn render_configs(config_manager: tauri::State<'_, Arc<config::ConfigManager>>) 
     config_manager.render_all_configs()
 }
 
+#[tauri::command]
+fn get_available_php_versions(
+    config_manager: tauri::State<'_, Arc<config::ConfigManager>>,
+) -> Result<Vec<String>, String> {
+    Ok(config_manager.get_available_php_versions())
+}
+
+#[tauri::command]
+fn set_site_php_version(
+    site_id: String,
+    php_version: String,
+    config_manager: tauri::State<'_, Arc<config::ConfigManager>>,
+) -> Result<config::Site, String> {
+    config_manager.set_site_php_version(&site_id, &php_version)
+}
+
 pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let supervisor = Arc::new(ProcessSupervisor::new(base_dir));
@@ -252,7 +268,9 @@ pub fn run() {
             install_root_ca,
             get_sites,
             add_linked_folder,
-            render_configs
+            render_configs,
+            get_available_php_versions,
+            set_site_php_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
