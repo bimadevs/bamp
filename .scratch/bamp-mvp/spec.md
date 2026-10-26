@@ -37,7 +37,7 @@ The BAMP MVP delivers a fully functional local development manager capable of ru
 
 ## Acceptance Criteria
 
-- [ ] `bamp` launches in under 500ms and consumes < 30MB RAM in idle state.
-- [ ] Clicking "Start All" successfully transitions all available services to `Running`.
-- [ ] Placing a test file `www/demo/index.php` with `<?php echo "Hello BAMP"; ?>` makes `http://demo.test` and `https://demo.test` immediately accessible in the browser without manual server restart.
-- [ ] Closing BAMP terminates all Nginx, PHP, and MySQL processes immediately with zero orphaned processes.
+- [x] `bamp` launches in under 500ms and consumes < 30MB RAM in idle state.
+- [x] Clicking "Start All" successfully transitions all available services to `Running`.
+- [x] Placing a test file `www/demo/index.php` with `<?php echo "Hello BAMP"; ?>` makes `http://demo.test` and `https://demo.test` immediately accessible in the browser without manual server restart.
+- [x] Closing BAMP terminates all Nginx, PHP, and MySQL processes immediately with zero orphaned processes.
