@@ -26,6 +26,12 @@ tokio = { version = "1", features = ["full"] }
 notify = "6"
 rcgen = "0.13"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_Security"] }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

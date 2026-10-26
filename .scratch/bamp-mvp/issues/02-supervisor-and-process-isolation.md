@@ -1,6 +1,6 @@
 # 02 - Process Supervisor & Anti-Zombie Isolation
 
-Status: ready-for-agent
+Status: resolved
 
 ## Goal
 Implement the process supervisor in `src-tauri/src/supervisor/` capable of spawning, health-checking, tracking, and cleanly terminating child services without leaving orphaned processes.
@@ -15,7 +15,13 @@ Implement the process supervisor in `src-tauri/src/supervisor/` capable of spawn
 5. Implement Tauri IPC commands: `start_service`, `stop_service`, `restart_service`, `start_all_services`, `stop_all_services`, `get_stack_status`.
 
 ## Completion Criteria
-- Unit tests verify that starting a mock service transitions through `Starting` to `Running`.
-- Exiting the parent process terminates mock child processes immediately.
+- [x] Unit tests verify that starting a mock service transitions through `Starting` to `Running`.
+- [x] Exiting the parent process terminates mock child processes immediately.
 
 ## Comments
+- Implemented `ProcessSupervisor` with process lifecycle states (`Stopped`, `Starting`, `Running`, `Stopping`, `Conflict`, `Error`).
+- Implemented `platform::configure_process_isolation` and `platform::terminate_process_tree` with `killpg` on Unix and Win32 Job Object on Windows.
+- Implemented `Drop` on `ProcessSupervisor` guaranteeing zero-zombie process termination.
+- Implemented `inspector::inspect_port` probing socket occupation and reading `/proc/net/tcp` socket inodes & PID/process name on Linux (`netstat` on Windows).
+- Implemented and wired Tauri IPC commands (`start_service`, `stop_service`, `restart_service`, `start_all_services`, `stop_all_services`, `get_stack_status`) in `src-tauri/src/lib.rs`.
+- All unit tests verified and passed via `cargo test`.
