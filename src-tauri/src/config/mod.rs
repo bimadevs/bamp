@@ -106,6 +106,21 @@ impl ConfigManager {
         // Sort alphabetically by domain
         sites.sort_by(|a, b| a.domain.cmp(&b.domain));
 
+        // Auto-register Adminer if available
+        let adminer_dir = self.base_dir.join("data/adminer");
+        if adminer_dir.join("index.php").is_file() {
+            sites.insert(0, Site {
+                id: "site_adminer".to_string(),
+                name: "Database Manager (Adminer)".to_string(),
+                domain: "adminer.test".to_string(),
+                path: adminer_dir.to_string_lossy().to_string(),
+                document_root: adminer_dir.to_string_lossy().to_string(),
+                php_version: "default".to_string(),
+                has_ssl: cert_exists,
+                status: "active".to_string(),
+            });
+        }
+
         *self.cached_sites.lock().unwrap() = sites.clone();
         Ok(sites)
     }

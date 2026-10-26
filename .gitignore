@@ -12,6 +12,19 @@ dist
 dist-ssr
 *.local
 
+# Rust & Tauri
+src-tauri/target/
+
+# Runtime data
+data/logs/*
+data/mysql/data/*
+data/mysql/*.sock
+data/mysql/*.pid
+data/nginx/*.pid
+data/apache/*.pid
+data/php/*.pid
+!data/adminer/index.php
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
