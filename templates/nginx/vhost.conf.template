@@ -1,0 +1,57 @@
+# Virtual Host configuration for {{domain}}
+server {
+    listen {{http_port}};
+    listen [::]:{{http_port}};
+    server_name {{domain}};
+    root {{document_root}};
+    index index.php index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass {{fastcgi_pass}};
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_intercept_errors off;
+        fastcgi_buffer_size 16k;
+        fastcgi_buffers 4 16k;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+
+server {
+    listen {{https_port}} ssl;
+    listen [::]:{{https_port}} ssl;
+    server_name {{domain}};
+    root {{document_root}};
+    index index.php index.html index.htm;
+
+    ssl_certificate {{ssl_cert}};
+    ssl_certificate_key {{ssl_key}};
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass {{fastcgi_pass}};
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_intercept_errors off;
+        fastcgi_buffer_size 16k;
+        fastcgi_buffers 4 16k;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}

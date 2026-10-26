@@ -1,0 +1,30 @@
+worker_processes auto;
+pid {{bamp_root}}/data/nginx/nginx.pid;
+error_log {{bamp_root}}/data/logs/nginx_error.log warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    access_log {{bamp_root}}/data/logs/nginx_access.log;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 128M;
+
+    # SSL Settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # Include dynamic virtual hosts
+    include {{bamp_root}}/data/nginx/vhosts/*.conf;
+}

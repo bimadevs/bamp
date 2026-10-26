@@ -1,0 +1,27 @@
+[mysqld]
+port = {{mysql_port}}
+socket = {{bamp_root}}/data/mysql/mysql.sock
+pid-file = {{bamp_root}}/data/mysql/mysql.pid
+datadir = {{bamp_root}}/data/mysql/data
+tmpdir = {{bamp_root}}/data/mysql/tmp
+bind-address = 127.0.0.1
+
+# Minimalist memory consumption
+key_buffer_size = 16M
+max_allowed_packet = 16M
+table_open_cache = 64
+sort_buffer_size = 512K
+net_buffer_length = 8K
+read_buffer_size = 256K
+read_rnd_buffer_size = 512K
+myisam_sort_buffer_size = 8M
+
+# InnoDB settings for low memory
+innodb_buffer_pool_size = 32M
+innodb_log_buffer_size = 8M
+innodb_file_per_table = 1
+
+[client]
+port = {{mysql_port}}
+socket = {{bamp_root}}/data/mysql/mysql.sock
+default-character-set = utf8mb4

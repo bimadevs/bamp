@@ -1,0 +1,33 @@
+<VirtualHost *:{{http_port}}>
+    ServerName {{domain}}
+    DocumentRoot "{{document_root}}"
+
+    <Directory "{{document_root}}">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    <FilesMatch \.php$>
+        SetHandler "proxy:fcgi://{{fastcgi_pass}}"
+    </FilesMatch>
+</VirtualHost>
+
+<VirtualHost *:{{https_port}}>
+    ServerName {{domain}}
+    DocumentRoot "{{document_root}}"
+
+    SSLEngine on
+    SSLCertificateFile "{{ssl_cert}}"
+    SSLCertificateKeyFile "{{ssl_key}}"
+
+    <Directory "{{document_root}}">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    <FilesMatch \.php$>
+        SetHandler "proxy:fcgi://{{fastcgi_pass}}"
+    </FilesMatch>
+</VirtualHost>

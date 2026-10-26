@@ -1,0 +1,23 @@
+ServerRoot "{{bamp_root}}"
+PidFile "{{bamp_root}}/data/apache/httpd.pid"
+ErrorLog "{{bamp_root}}/data/logs/apache_error.log"
+
+Listen {{http_port}}
+Listen {{https_port}}
+
+LoadModule mpm_event_module modules/mod_mpm_event.so
+LoadModule authz_core_module modules/mod_authz_core.so
+LoadModule dir_module modules/mod_dir.so
+LoadModule mime_module modules/mod_mime.so
+LoadModule log_config_module modules/mod_log_config.so
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so
+LoadModule ssl_module modules/mod_ssl.so
+
+<Directory />
+    AllowOverride All
+    Require all granted
+</Directory>
+
+IncludeOptional "{{bamp_root}}/data/apache/vhosts/*.conf"

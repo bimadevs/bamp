@@ -1,6 +1,6 @@
 # 05 - Configuration Templates & Dynamic Virtual Host Generator
 
-Status: ready-for-agent
+Status: resolved
 
 ## Goal
 Implement template-driven configuration rendering for Nginx, PHP-FPM, and MySQL, with a file-system watcher that automatically registers and updates virtual hosts when folders in `www/` change.
@@ -21,7 +21,12 @@ Implement template-driven configuration rendering for Nginx, PHP-FPM, and MySQL,
 4. Expose Tauri command `get_sites`.
 
 ## Completion Criteria
-- Creating directory `www/mysite` with `index.php` creates `data/nginx/vhosts/mysite.test.conf`.
-- Deleting the directory removes the configuration file.
+- [x] Creating directory `www/mysite` with `index.php` creates `data/nginx/vhosts/mysite.test.conf`.
+- [x] Deleting the directory removes the configuration file.
 
 ## Comments
+- Authored default template files in `templates/nginx/`, `templates/apache/`, `templates/php/`, and `templates/mysql/`.
+- Implemented `ConfigManager` with placeholder substitution (`render_template`) and site auto-discovery with public root detection (`public/index.php` vs `index.php`).
+- Implemented `notify` filesystem watcher on `www/` for automatic virtual host re-generation.
+- Exposed Tauri commands `get_sites`, `add_linked_folder`, and `render_configs`.
+- Verified in automated unit tests (`test_render_template_and_site_detection`).

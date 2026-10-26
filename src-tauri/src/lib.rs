@@ -74,6 +74,24 @@ fn install_root_ca() -> Result<String, String> {
     ssl_manager.install_root_ca()
 }
 
+#[tauri::command]
+fn get_sites(config_manager: tauri::State<'_, Arc<config::ConfigManager>>) -> Result<Vec<config::Site>, String> {
+    config_manager.refresh_sites()
+}
+
+#[tauri::command]
+fn add_linked_folder(
+    path: String,
+    config_manager: tauri::State<'_, Arc<config::ConfigManager>>,
+) -> Result<Vec<config::Site>, String> {
+    config_manager.add_linked_folder(std::path::PathBuf::from(path))
+}
+
+#[tauri::command]
+fn render_configs(config_manager: tauri::State<'_, Arc<config::ConfigManager>>) -> Result<(), String> {
+    config_manager.render_all_configs()
+}
+
 pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let supervisor = Arc::new(ProcessSupervisor::new(base_dir));
@@ -147,9 +165,19 @@ pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let supervisor = create_default_supervisor();
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let config_manager = Arc::new(config::ConfigManager::new(base_dir));
+
+    // Render initial configurations
+    let _ = config_manager.render_all_configs();
+
+    // Start background watcher on www/
+    let watcher_cm = config_manager.clone();
+    let _ = watcher_cm.start_watcher();
 
     tauri::Builder::default()
         .manage(supervisor)
+        .manage(config_manager)
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
             let dns_server = dns::DnsServer::new();
@@ -169,7 +197,10 @@ pub fn run() {
             get_stack_status,
             sync_hosts,
             ensure_ssl_certificates,
-            install_root_ca
+            install_root_ca,
+            get_sites,
+            add_linked_folder,
+            render_configs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
