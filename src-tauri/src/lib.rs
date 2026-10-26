@@ -60,6 +60,20 @@ fn sync_hosts(domains: Vec<String>) -> Result<(), String> {
     dns::HostsManager::sync_domains(&domain_refs)
 }
 
+#[tauri::command]
+fn ensure_ssl_certificates() -> Result<ssl::SslPaths, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let ssl_manager = ssl::SslManager::new(&base_dir);
+    ssl_manager.ensure_certificates()
+}
+
+#[tauri::command]
+fn install_root_ca() -> Result<String, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let ssl_manager = ssl::SslManager::new(&base_dir);
+    ssl_manager.install_root_ca()
+}
+
 pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let supervisor = Arc::new(ProcessSupervisor::new(base_dir));
@@ -153,7 +167,9 @@ pub fn run() {
             start_all_services,
             stop_all_services,
             get_stack_status,
-            sync_hosts
+            sync_hosts,
+            ensure_ssl_certificates,
+            install_root_ca
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
