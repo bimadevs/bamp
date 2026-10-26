@@ -59,6 +59,8 @@ struct ActiveChild {
 
 pub struct ProcessSupervisor {
     base_dir: PathBuf,
+    active_web_server: Mutex<String>,
+    app_handle: Mutex<Option<tauri::AppHandle>>,
     definitions: Mutex<HashMap<String, ServiceDefinition>>,
     children: Mutex<HashMap<String, ActiveChild>>,
     states: Mutex<HashMap<String, ServiceState>>,
@@ -68,10 +70,81 @@ impl ProcessSupervisor {
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
             base_dir,
+            active_web_server: Mutex::new("nginx".to_string()),
+            app_handle: Mutex::new(None),
             definitions: Mutex::new(HashMap::new()),
             children: Mutex::new(HashMap::new()),
             states: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        *self.app_handle.lock().unwrap() = Some(handle);
+    }
+
+    /// Get current active web server id ("nginx" or "apache")
+    pub fn get_active_web_server(&self) -> String {
+        self.active_web_server.lock().unwrap().clone()
+    }
+
+    /// Set active web server and smoothly switch if currently running
+    pub fn set_active_web_server(&self, server_id: &str) -> Result<String, String> {
+        if server_id != "nginx" && server_id != "apache" {
+            return Err("Supported web servers are 'nginx' and 'apache'".to_string());
+        }
+
+        let old_server = self.get_active_web_server();
+        if old_server == server_id {
+            return Ok(server_id.to_string());
+        }
+
+        // Check if old server was running
+        let was_running = {
+            let states = self.states.lock().unwrap();
+            states.get(&old_server).map(|s| s.status == ServiceStatus::Running).unwrap_or(false)
+        };
+
+        if was_running {
+            let _ = self.stop_service(&old_server);
+        }
+
+        *self.active_web_server.lock().unwrap() = server_id.to_string();
+
+        if was_running {
+            let _ = self.start_service(server_id);
+        }
+
+        Ok(server_id.to_string())
+    }
+
+    /// Graceful reload of the active web server process
+    pub fn reload_web_server(&self) -> Result<(), String> {
+        let active = self.get_active_web_server();
+        let is_running = {
+            let states = self.states.lock().unwrap();
+            states.get(&active).map(|s| s.status == ServiceStatus::Running).unwrap_or(false)
+        };
+
+        if !is_running {
+            return Ok(());
+        }
+
+        if active == "nginx" {
+            if let Some(bin) = resolve_binary(&self.base_dir, "nginx", &["nginx"]) {
+                let _ = Command::new(bin)
+                    .args(["-p", ".", "-c", "data/nginx/nginx.conf", "-s", "reload"])
+                    .current_dir(&self.base_dir)
+                    .status();
+            }
+        } else if active == "apache" {
+            if let Some(bin) = resolve_binary(&self.base_dir, "apache", &["httpd", "apache2"]) {
+                let _ = Command::new(bin)
+                    .args(["-f", "data/apache/httpd.conf", "-k", "graceful"])
+                    .current_dir(&self.base_dir)
+                    .status();
+            }
+        }
+        Ok(())
     }
 
     /// Register a service definition.
@@ -198,7 +271,10 @@ impl ProcessSupervisor {
 
         configure_process_isolation(&mut cmd);
 
-        let child = cmd.spawn().map_err(|e| {
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| {
             let err = format!("Failed to spawn {}: {}", def.name, e);
             let mut states = self.states.lock().unwrap();
             if let Some(state) = states.get_mut(id) {
@@ -210,6 +286,59 @@ impl ProcessSupervisor {
 
         let pid = child.id();
         let _ = attach_child_isolation(pid);
+
+        // Pipe stdout and stderr asynchronously
+        if let Some(stdout) = child.stdout.take() {
+            let id_clone = id.to_string();
+            let app_opt = self.app_handle.lock().unwrap().clone();
+            let base_clone = self.base_dir.clone();
+            std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader, Write};
+                let reader = BufReader::new(stdout);
+                let log_file_path = base_clone.join("data/logs").join(format!("{}.log", id_clone));
+                let _ = std::fs::create_dir_all(base_clone.join("data/logs"));
+                let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&log_file_path).ok();
+                for line in reader.lines().flatten() {
+                    if let Some(ref mut f) = file {
+                        let _ = writeln!(f, "[stdout] {}", line);
+                    }
+                    if let Some(ref app) = app_opt {
+                        use tauri::Emitter;
+                        let _ = app.emit("log-stream", serde_json::json!({
+                            "service": id_clone,
+                            "level": "info",
+                            "msg": line,
+                        }));
+                    }
+                }
+            });
+        }
+
+        if let Some(stderr) = child.stderr.take() {
+            let id_clone = id.to_string();
+            let app_opt = self.app_handle.lock().unwrap().clone();
+            let base_clone = self.base_dir.clone();
+            std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader, Write};
+                let reader = BufReader::new(stderr);
+                let log_file_path = base_clone.join("data/logs").join(format!("{}.log", id_clone));
+                let _ = std::fs::create_dir_all(base_clone.join("data/logs"));
+                let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&log_file_path).ok();
+                for line in reader.lines().flatten() {
+                    if let Some(ref mut f) = file {
+                        let _ = writeln!(f, "[stderr] {}", line);
+                    }
+                    if let Some(ref app) = app_opt {
+                        use tauri::Emitter;
+                        let _ = app.emit("log-stream", serde_json::json!({
+                            "service": id_clone,
+                            "level": "error",
+                            "msg": line,
+                        }));
+                    }
+                }
+            });
+        }
 
         // 6. If service has a port, probe health
         if let Some(port) = def.default_port {
@@ -309,9 +438,12 @@ impl ProcessSupervisor {
         self.start_service(id)
     }
 
-    /// Start all registered services in order.
+    /// Start all registered services in order (respecting active web server).
     pub fn start_all_services(&self) -> Result<StackStatus, String> {
-        let order = ["dns", "mysql", "php", "apache", "nginx", "mailpit"];
+        let active_ws = self.get_active_web_server();
+        let inactive_ws = if active_ws == "nginx" { "apache" } else { "nginx" };
+
+        let order = ["dns", "mysql", "php", active_ws.as_str(), "mailpit"];
         let registered_ids: Vec<String> = self.definitions.lock().unwrap().keys().cloned().collect();
 
         for service_id in &order {
@@ -320,9 +452,9 @@ impl ProcessSupervisor {
             }
         }
 
-        // Start any other services not in the predefined list
+        // Start any other services not in the predefined list, but skip inactive web server
         for service_id in &registered_ids {
-            if !order.contains(&service_id.as_str()) {
+            if service_id != inactive_ws && !order.contains(&service_id.as_str()) {
                 let _ = self.start_service(service_id);
             }
         }

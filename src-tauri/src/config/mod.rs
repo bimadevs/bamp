@@ -21,21 +21,89 @@ pub struct Site {
     pub status: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    pub active_web_server: String,
+    pub default_php_version: String,
+    pub linked_folders: Vec<PathBuf>,
+    pub site_php_overrides: HashMap<String, String>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            active_web_server: "nginx".to_string(),
+            default_php_version: "default".to_string(),
+            linked_folders: Vec::new(),
+            site_php_overrides: HashMap::new(),
+        }
+    }
+}
+
+pub fn php_version_to_port(ver: &str) -> u16 {
+    match ver {
+        "php-8.4" => 9084,
+        "php-8.3" => 9083,
+        "php-8.2" => 9082,
+        "php-8.1" => 9081,
+        "php-7.4" => 9074,
+        _ => 9000,
+    }
+}
+
 pub struct ConfigManager {
     base_dir: PathBuf,
-    linked_folders: Mutex<Vec<PathBuf>>,
+    settings: Mutex<AppSettings>,
     cached_sites: Mutex<Vec<Site>>,
-    site_php_overrides: Mutex<HashMap<String, String>>,
+    supervisor: Mutex<Option<Arc<crate::supervisor::ProcessSupervisor>>>,
 }
 
 impl ConfigManager {
     pub fn new(base_dir: PathBuf) -> Self {
+        let settings_path = base_dir.join("data").join("settings.json");
+        let settings = if let Ok(content) = fs::read_to_string(&settings_path) {
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            AppSettings::default()
+        };
+
         Self {
             base_dir,
-            linked_folders: Mutex::new(Vec::new()),
+            settings: Mutex::new(settings),
             cached_sites: Mutex::new(Vec::new()),
-            site_php_overrides: Mutex::new(HashMap::new()),
+            supervisor: Mutex::new(None),
         }
+    }
+
+    pub fn set_supervisor(&self, supervisor: Arc<crate::supervisor::ProcessSupervisor>) {
+        *self.supervisor.lock().unwrap() = Some(supervisor);
+    }
+
+    pub fn get_settings(&self) -> AppSettings {
+        self.settings.lock().unwrap().clone()
+    }
+
+    pub fn save_settings(&self) -> Result<(), String> {
+        let settings_path = self.base_dir.join("data").join("settings.json");
+        let _ = fs::create_dir_all(self.base_dir.join("data"));
+        let json = serde_json::to_string_pretty(&*self.settings.lock().unwrap())
+            .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+        fs::write(settings_path, json)
+            .map_err(|e| format!("Failed to write settings: {}", e))?;
+        Ok(())
+    }
+
+    pub fn set_active_web_server(&self, server: &str) -> Result<String, String> {
+        {
+            let mut s = self.settings.lock().unwrap();
+            s.active_web_server = server.to_string();
+        }
+        self.save_settings()?;
+        if let Some(ref sup) = *self.supervisor.lock().unwrap() {
+            sup.set_active_web_server(server)?;
+        }
+        Ok(server.to_string())
     }
 
     pub fn get_available_php_versions(&self) -> Vec<String> {
@@ -49,7 +117,7 @@ impl ConfigManager {
                 }
             }
         }
-        for common in &["php-8.4", "php-8.3", "php-8.2", "php-7.4"] {
+        for common in &["php-8.4", "php-8.3", "php-8.2", "php-8.1", "php-7.4"] {
             if !versions.contains(&common.to_string()) {
                 versions.push(common.to_string());
             }
@@ -59,10 +127,14 @@ impl ConfigManager {
 
     pub fn set_site_php_version(&self, site_id: &str, php_version: &str) -> Result<Site, String> {
         {
-            let mut overrides = self.site_php_overrides.lock().unwrap();
-            overrides.insert(site_id.to_string(), php_version.to_string());
+            let mut s = self.settings.lock().unwrap();
+            s.site_php_overrides.insert(site_id.to_string(), php_version.to_string());
         }
+        self.save_settings()?;
         self.render_all_configs()?;
+        if let Some(ref sup) = *self.supervisor.lock().unwrap() {
+            let _ = sup.reload_web_server();
+        }
         let sites = self.get_sites();
         sites
             .into_iter()
@@ -75,11 +147,12 @@ impl ConfigManager {
             return Err(format!("Path is not a valid directory: {}", path.display()));
         }
         {
-            let mut linked = self.linked_folders.lock().unwrap();
-            if !linked.contains(&path) {
-                linked.push(path);
+            let mut s = self.settings.lock().unwrap();
+            if !s.linked_folders.contains(&path) {
+                s.linked_folders.push(path);
             }
         }
+        self.save_settings()?;
         self.refresh_sites()
     }
 
@@ -89,11 +162,12 @@ impl ConfigManager {
         let _ = fs::create_dir_all(&www_dir);
 
         let mut sites = Vec::new();
-        let mut scan_dirs = vec![www_dir];
-        {
-            let linked = self.linked_folders.lock().unwrap();
-            scan_dirs.extend(linked.iter().cloned());
-        }
+        let scan_dirs = {
+            let mut dirs = vec![www_dir];
+            let s = self.settings.lock().unwrap();
+            dirs.extend(s.linked_folders.iter().cloned());
+            dirs
+        };
 
         let cert_exists = self.base_dir.join("data/ssl/cert.pem").exists();
 
@@ -123,8 +197,8 @@ impl ConfigManager {
 
                         let site_id = format!("site_{}", folder_name);
                         let php_version = {
-                            let overrides = self.site_php_overrides.lock().unwrap();
-                            overrides.get(&site_id).cloned().unwrap_or_else(|| "default".to_string())
+                            let s = self.settings.lock().unwrap();
+                            s.site_php_overrides.get(&site_id).cloned().unwrap_or_else(|| "default".to_string())
                         };
 
                         let site = Site {
@@ -208,12 +282,26 @@ impl ConfigManager {
                 .map_err(|e| format!("Failed writing httpd.conf: {}", e))?;
         }
 
-        // 3. Render php-fpm.conf
+        // 3. Render base php-fpm.conf (default on port 9000)
         let php_tpl = self.base_dir.join("templates/php/php-fpm.conf.template");
         if php_tpl.is_file() {
             let rendered = render_template(&php_tpl, &replacements)?;
             fs::write(data_dir.join("php/php-fpm.conf"), rendered)
                 .map_err(|e| format!("Failed writing php-fpm.conf: {}", e))?;
+
+            // Also render pool configs for each PHP version
+            for (ver, port) in &[
+                ("php-8.4", 9084),
+                ("php-8.3", 9083),
+                ("php-8.2", 9082),
+                ("php-8.1", 9081),
+                ("php-7.4", 9074),
+            ] {
+                let mut pool_replacements = replacements.clone();
+                pool_replacements.insert("fastcgi_pass", format!("127.0.0.1:{}", port));
+                let pool_rendered = render_template(&php_tpl, &pool_replacements)?;
+                let _ = fs::write(data_dir.join(format!("php/php-fpm-{}.conf", ver)), pool_rendered);
+            }
         }
 
         // 4. Render my.cnf
@@ -238,6 +326,8 @@ impl ConfigManager {
             let mut site_replacements = replacements.clone();
             site_replacements.insert("domain", site.domain.clone());
             site_replacements.insert("document_root", site.document_root.clone());
+            let php_port = php_version_to_port(&site.php_version);
+            site_replacements.insert("fastcgi_pass", format!("127.0.0.1:{}", php_port));
 
             // Nginx vhost
             if nginx_vhost_tpl.is_file() {
@@ -269,6 +359,9 @@ impl ConfigManager {
                 // If a path was created, removed, or modified
                 if event.kind.is_create() || event.kind.is_remove() || event.kind.is_modify() {
                     let _ = manager_clone.render_all_configs();
+                    if let Some(ref sup) = *manager_clone.supervisor.lock().unwrap() {
+                        let _ = sup.reload_web_server();
+                    }
                 }
             }
         })
@@ -325,7 +418,7 @@ mod tests {
 
         // Write a test template
         let vhost_tpl = tpl_dir.join("vhost.conf.template");
-        fs::write(&vhost_tpl, "server { server_name {{domain}}; root {{document_root}}; }").unwrap();
+        fs::write(&vhost_tpl, "server { server_name {{domain}}; root {{document_root}}; fastcgi_pass {{fastcgi_pass}}; }").unwrap();
 
         let manager = ConfigManager::new(temp_dir.clone());
         let sites = manager.refresh_sites().unwrap();
@@ -341,6 +434,36 @@ mod tests {
         let content = fs::read_to_string(out_conf).unwrap();
         assert!(content.contains("server_name mysite.test;"));
         assert!(content.contains(&sites[0].document_root));
+        assert!(content.contains("127.0.0.1:9000"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_php_version_to_port() {
+        assert_eq!(php_version_to_port("default"), 9000);
+        assert_eq!(php_version_to_port("php-8.4"), 9084);
+        assert_eq!(php_version_to_port("php-8.3"), 9083);
+        assert_eq!(php_version_to_port("php-7.4"), 9074);
+    }
+
+    #[test]
+    fn test_settings_persistence() {
+        let temp_dir = std::env::temp_dir().join(format!("bamp_settings_test_{}", std::process::id()));
+        let manager = ConfigManager::new(temp_dir.clone());
+
+        manager.set_active_web_server("apache").unwrap();
+        let s = manager.get_settings();
+        assert_eq!(s.active_web_server, "apache");
+
+        // Verify written to disk
+        let saved_file = temp_dir.join("data/settings.json");
+        assert!(saved_file.exists());
+
+        // Create new manager and verify it loads the saved setting
+        let manager2 = ConfigManager::new(temp_dir.clone());
+        let s2 = manager2.get_settings();
+        assert_eq!(s2.active_web_server, "apache");
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

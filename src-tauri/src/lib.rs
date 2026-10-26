@@ -1,9 +1,11 @@
 pub mod config;
 pub mod dns;
 pub mod inspector;
+pub mod php;
 pub mod platform;
 pub mod ssl;
 pub mod supervisor;
+pub mod tools;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -111,6 +113,104 @@ fn set_site_php_version(
     config_manager.set_site_php_version(&site_id, &php_version)
 }
 
+#[tauri::command]
+fn get_active_web_server(
+    supervisor: tauri::State<'_, Arc<ProcessSupervisor>>,
+) -> Result<String, String> {
+    Ok(supervisor.get_active_web_server())
+}
+
+#[tauri::command]
+fn set_active_web_server(
+    server_id: String,
+    config_manager: tauri::State<'_, Arc<config::ConfigManager>>,
+) -> Result<String, String> {
+    config_manager.set_active_web_server(&server_id)
+}
+
+#[tauri::command]
+fn reload_web_server(
+    supervisor: tauri::State<'_, Arc<ProcessSupervisor>>,
+) -> Result<(), String> {
+    supervisor.reload_web_server()
+}
+
+#[tauri::command]
+fn get_settings(
+    config_manager: tauri::State<'_, Arc<config::ConfigManager>>,
+) -> Result<config::AppSettings, String> {
+    Ok(config_manager.get_settings())
+}
+
+#[tauri::command]
+fn get_php_config() -> Result<php::PhpConfig, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    php::PhpManager::get_php_config(&base_dir)
+}
+
+#[tauri::command]
+fn toggle_php_extension(
+    extension_name: String,
+    enabled: bool,
+    supervisor: tauri::State<'_, Arc<ProcessSupervisor>>,
+) -> Result<bool, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let res = php::PhpManager::toggle_extension(&base_dir, &extension_name, enabled)?;
+    let _ = supervisor.restart_service("php");
+    Ok(res)
+}
+
+#[tauri::command]
+fn update_php_directive(
+    key: String,
+    value: String,
+    supervisor: tauri::State<'_, Arc<ProcessSupervisor>>,
+) -> Result<String, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let res = php::PhpManager::update_directive(&base_dir, &key, &value)?;
+    let _ = supervisor.restart_service("php");
+    Ok(res)
+}
+
+#[tauri::command]
+fn launch_isolated_terminal(
+    active_php: Option<String>,
+) -> Result<String, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let php_ver = active_php.unwrap_or_else(|| "default".to_string());
+    tools::ToolsManager::launch_isolated_terminal(&base_dir, &php_ver)
+}
+
+#[tauri::command]
+fn launch_database_client() -> Result<String, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    tools::ToolsManager::launch_database_client(&base_dir)
+}
+
+#[tauri::command]
+fn scaffold_app(
+    app_type: String,
+    project_name: String,
+    config_manager: tauri::State<'_, Arc<config::ConfigManager>>,
+) -> Result<String, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let url = tools::ToolsManager::scaffold_app(&base_dir, &app_type, &project_name)?;
+    let _ = config_manager.render_all_configs();
+    Ok(url)
+}
+
+#[tauri::command]
+fn get_package_hub() -> Result<Vec<tools::PackageInfo>, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    Ok(tools::ToolsManager::get_package_hub(&base_dir))
+}
+
+#[tauri::command]
+fn install_package(package_id: String) -> Result<String, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    tools::ToolsManager::install_package(&base_dir, &package_id)
+}
+
 pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let supervisor = Arc::new(ProcessSupervisor::new(base_dir));
@@ -137,7 +237,7 @@ pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
         env: HashMap::new(),
     });
 
-    // Register PHP-FPM
+    // Register PHP-FPM default
     supervisor.register_service(ServiceDefinition {
         id: "php".to_string(),
         name: "PHP-FPM".to_string(),
@@ -187,6 +287,11 @@ pub fn run() {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let config_manager = Arc::new(config::ConfigManager::new(base_dir));
 
+    // Connect supervisor to config manager
+    config_manager.set_supervisor(supervisor.clone());
+    let saved_settings = config_manager.get_settings();
+    let _ = supervisor.set_active_web_server(&saved_settings.active_web_server);
+
     // Render initial configurations
     let _ = config_manager.render_all_configs();
 
@@ -195,10 +300,12 @@ pub fn run() {
     let _ = watcher_cm.start_watcher();
 
     tauri::Builder::default()
-        .manage(supervisor)
+        .manage(supervisor.clone())
         .manage(config_manager)
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
+            supervisor.set_app_handle(app.handle().clone());
+
             let dns_server = dns::DnsServer::new();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = dns_server.start(53).await {
@@ -270,7 +377,19 @@ pub fn run() {
             add_linked_folder,
             render_configs,
             get_available_php_versions,
-            set_site_php_version
+            set_site_php_version,
+            get_active_web_server,
+            set_active_web_server,
+            reload_web_server,
+            get_settings,
+            get_php_config,
+            toggle_php_extension,
+            update_php_directive,
+            launch_isolated_terminal,
+            launch_database_client,
+            scaffold_app,
+            get_package_hub,
+            install_package
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
