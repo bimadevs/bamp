@@ -391,7 +391,49 @@ impl ToolsManager {
         fs::create_dir_all(&target_dir)
             .map_err(|e| format!("Failed to create package directory: {}", e))?;
 
-        // Initialize a placeholder binary wrapper or README
+        let script_path = base_dir.join("scripts/install-service-version.ps1");
+        if script_path.is_file() {
+            let ver = package_id.strip_prefix("php-").unwrap_or(package_id);
+            let cmd_opt = if cfg!(windows) {
+                let mut c = std::process::Command::new("powershell");
+                c.args([
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    &script_path.to_string_lossy(),
+                    "-Php",
+                    ver,
+                ]);
+                Some(c)
+            } else if which::which("pwsh").is_ok() {
+                let mut c = std::process::Command::new("pwsh");
+                c.args([
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    &script_path.to_string_lossy(),
+                    "-Php",
+                    ver,
+                ]);
+                Some(c)
+            } else {
+                None
+            };
+
+            if let Some(mut cmd) = cmd_opt {
+                cmd.current_dir(base_dir);
+                let output = cmd.output().map_err(|e| format!("Failed to execute version installer: {}", e))?;
+                if output.status.success() {
+                    return Ok(format!("Package {} successfully installed into bin/php/{}.", package_id, package_id));
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    return Err(format!("Installer script failed:\n{}\n{}", stdout, stderr));
+                }
+            }
+        }
+
+        // Fallback placeholder
         let readme_file = target_dir.join("README.txt");
         let _ = fs::write(
             readme_file,

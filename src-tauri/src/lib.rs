@@ -14,6 +14,25 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 
+/// Resolves the base root directory for BAMP, checking both working directory and executable directory
+pub fn resolve_bamp_base_dir() -> std::path::PathBuf {
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join("bin").exists() && cwd.join("templates").exists() {
+            return cwd;
+        }
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            if exe_dir.join("bin").exists() || exe_dir.join("templates").exists() {
+                return exe_dir.to_path_buf();
+            }
+        }
+    }
+
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
 #[tauri::command]
 fn start_service(
     service_id: String,
@@ -67,14 +86,14 @@ fn sync_hosts(domains: Vec<String>) -> Result<(), String> {
 
 #[tauri::command]
 fn ensure_ssl_certificates() -> Result<ssl::SslPaths, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let ssl_manager = ssl::SslManager::new(&base_dir);
     ssl_manager.ensure_certificates()
 }
 
 #[tauri::command]
 fn install_root_ca() -> Result<String, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let ssl_manager = ssl::SslManager::new(&base_dir);
     ssl_manager.install_root_ca()
 }
@@ -144,7 +163,7 @@ fn get_settings(
 
 #[tauri::command]
 fn get_php_config() -> Result<php::PhpConfig, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     php::PhpManager::get_php_config(&base_dir)
 }
 
@@ -154,7 +173,7 @@ fn toggle_php_extension(
     enabled: bool,
     supervisor: tauri::State<'_, Arc<ProcessSupervisor>>,
 ) -> Result<bool, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let res = php::PhpManager::toggle_extension(&base_dir, &extension_name, enabled)?;
     let _ = supervisor.restart_service("php");
     Ok(res)
@@ -166,7 +185,7 @@ fn update_php_directive(
     value: String,
     supervisor: tauri::State<'_, Arc<ProcessSupervisor>>,
 ) -> Result<String, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let res = php::PhpManager::update_directive(&base_dir, &key, &value)?;
     let _ = supervisor.restart_service("php");
     Ok(res)
@@ -176,14 +195,14 @@ fn update_php_directive(
 fn launch_isolated_terminal(
     active_php: Option<String>,
 ) -> Result<String, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let php_ver = active_php.unwrap_or_else(|| "default".to_string());
     tools::ToolsManager::launch_isolated_terminal(&base_dir, &php_ver)
 }
 
 #[tauri::command]
 fn launch_database_client() -> Result<String, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     tools::ToolsManager::launch_database_client(&base_dir)
 }
 
@@ -193,7 +212,7 @@ fn scaffold_app(
     project_name: String,
     config_manager: tauri::State<'_, Arc<config::ConfigManager>>,
 ) -> Result<String, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let url = tools::ToolsManager::scaffold_app(&base_dir, &app_type, &project_name)?;
     let _ = config_manager.render_all_configs();
     Ok(url)
@@ -201,25 +220,25 @@ fn scaffold_app(
 
 #[tauri::command]
 fn get_package_hub() -> Result<Vec<tools::PackageInfo>, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     Ok(tools::ToolsManager::get_package_hub(&base_dir))
 }
 
 #[tauri::command]
 fn install_package(package_id: String) -> Result<String, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     tools::ToolsManager::install_package(&base_dir, &package_id)
 }
 
 #[tauri::command]
 fn download_service_binaries(services: Option<String>) -> Result<String, String> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let target_services = services.unwrap_or_else(|| "all".to_string());
     tools::ToolsManager::download_service_binaries(&base_dir, &target_services)
 }
 
 pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let supervisor = Arc::new(ProcessSupervisor::new(base_dir));
 
     // Register Nginx
@@ -314,7 +333,7 @@ pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let supervisor = create_default_supervisor();
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = resolve_bamp_base_dir();
     let config_manager = Arc::new(config::ConfigManager::new(base_dir));
 
     // Connect supervisor to config manager

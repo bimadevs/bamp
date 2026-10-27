@@ -121,21 +121,44 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
+      - name: Pre-bundle Windows Service Binaries
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/install-binaries-win.ps1
+
       - name: Build Tauri Windows installer (.exe & .msi)
         run: |
           pnpm tauri build --bundles nsis,msi
 
       - name: Collect Windows artifacts
-        shell: bash
+        shell: pwsh
         run: |
-          mkdir -p artifacts-windows
+          New-Item -ItemType Directory -Path artifacts-windows -Force | Out-Null
           # Copy NSIS .exe installers and MSI packages
-          find src-tauri/target/release/bundle/ -type f \( -name "*.exe" -o -name "*.msi" \) -exec cp {} artifacts-windows/ \; 2>/dev/null || true
-          # Also copy standalone bamp.exe if available
-          if [ -f src-tauri/target/release/bamp.exe ]; then
-            cp src-tauri/target/release/bamp.exe artifacts-windows/bamp-windows-x86_64.exe
-          fi
-          ls -lah artifacts-windows/
+          Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -Include "*.exe", "*.msi" |
+            Copy-Item -Destination artifacts-windows/ -Force
+          
+          # Also copy standalone bamp.exe
+          if (Test-Path "src-tauri/target/release/bamp.exe") {
+            Copy-Item "src-tauri/target/release/bamp.exe" "artifacts-windows/bamp-windows-x86_64.exe" -Force
+          }
+
+          # Create standalone portable zip package with binaries pre-bundled
+          $portableDir = "bamp-portable"
+          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+          if (Test-Path "src-tauri/target/release/bamp.exe") {
+            Copy-Item "src-tauri/target/release/bamp.exe" "$portableDir/bamp.exe" -Force
+          }
+          if (Test-Path "bin") { Copy-Item "bin" "$portableDir/bin" -Recurse -Force }
+          if (Test-Path "templates") { Copy-Item "templates" "$portableDir/templates" -Recurse -Force }
+          if (Test-Path "scripts") { Copy-Item "scripts" "$portableDir/scripts" -Recurse -Force }
+          if (Test-Path "data/adminer") {
+            New-Item -ItemType Directory -Path "$portableDir/data" -Force | Out-Null
+            Copy-Item "data/adminer" "$portableDir/data/adminer" -Recurse -Force
+          }
+          Compress-Archive -Path "$portableDir/*" -DestinationPath "artifacts-windows/bamp-windows-x86_64-portable.zip" -Force
+
+          Get-ChildItem -Path artifacts-windows
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -176,8 +199,10 @@ jobs:
             ## BAMP: Ultra-Lightweight Modern Local Development Stack Manager
 
             ### 📦 Download Packages
-            - **Windows**: Download the `.exe` installer (e.g. `bamp_*_x64-setup.exe` or `bamp-windows-x86_64.exe`)
-            - **Linux**: Download the `.AppImage` (make executable with `chmod +x` and run) or `.deb` package
+            - **Windows (Installer)**: Download `bamp_*_x64-setup.exe` (Pre-bundled with Nginx, Apache, PHP 8.3, MariaDB, and Mailpit).
+            - **Windows (Portable Zip)**: Download `bamp-windows-x86_64-portable.zip` (Ready to extract and run without installation).
+            - **Windows (MSI)**: Download `bamp_*_x64_en-US.msi`.
+            - **Linux**: Download `.AppImage` (make executable with `chmod +x`) or `.deb`.
 
             ### 🛡️ Checksums
             See `SHA256SUMS.txt` attached below for package verification.
