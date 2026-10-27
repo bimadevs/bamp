@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Setup a process command to ensure proper isolation and anti-zombie cleanup.
-pub fn configure_process_isolation(cmd: &mut Command) {
+pub fn configure_process_isolation(_cmd: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         // process_group(0) sets the process group ID to the child's PID upon spawn.
-        cmd.process_group(0);
+        _cmd.process_group(0);
     }
 }
 
@@ -25,11 +25,11 @@ pub fn attach_child_isolation(#[allow(unused_variables)] pid: u32) -> Result<(),
 }
 
 /// Terminate an entire process group gracefully (SIGTERM), falling back to SIGKILL.
-pub fn terminate_process_tree(pid: u32, force: bool) -> Result<(), String> {
+pub fn terminate_process_tree(pid: u32, _force: bool) -> Result<(), String> {
     #[cfg(unix)]
     {
         let pgid = pid as i32;
-        let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+        let signal = if _force { libc::SIGKILL } else { libc::SIGTERM };
         let ret = unsafe { libc::killpg(pgid, signal) };
         if ret != 0 {
             // Also try direct kill on pid if killpg failed
