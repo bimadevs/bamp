@@ -25,6 +25,19 @@ data/apache/*.pid
 data/php/*.pid
 !data/adminer/index.php
 
+# Portable service binaries (downloaded via script / package hub)
+bin/nginx/*
+!bin/nginx/.gitkeep
+bin/apache/*
+!bin/apache/.gitkeep
+bin/mysql/*
+!bin/mysql/.gitkeep
+bin/php/*
+!bin/php/.gitkeep
+bin/mailpit/*.exe
+bin/mailpit/*.zip
+
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

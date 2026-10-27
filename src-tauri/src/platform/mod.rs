@@ -113,19 +113,42 @@ pub fn resolve_binary(
     service_id: &str,
     binary_names: &[&str],
 ) -> Option<PathBuf> {
+    let check_file = |path: PathBuf| -> Option<PathBuf> {
+        if path.is_file() {
+            return Some(path);
+        }
+        let exe_path = PathBuf::from(format!("{}.exe", path.display()));
+        if exe_path.is_file() {
+            return Some(exe_path);
+        }
+        None
+    };
+
     // 1. Check portable `bin/<service_id>/`
     let portable_dir = base_dir.join("bin").join(service_id);
     for name in binary_names {
-        let candidate = portable_dir.join(name);
-        if candidate.is_file() {
+        if let Some(candidate) = check_file(portable_dir.join(name)) {
             return Some(candidate);
         }
-        #[cfg(windows)]
-        {
-            let exe_name = format!("{}.exe", name);
-            let candidate_exe = portable_dir.join(exe_name);
-            if candidate_exe.is_file() {
-                return Some(candidate_exe);
+        // Check `bin/<service_id>/bin/<name>` (standard for Apache and MariaDB)
+        if let Some(candidate) = check_file(portable_dir.join("bin").join(name)) {
+            return Some(candidate);
+        }
+    }
+
+    // Check versioned subdirectories: `bin/<service_id>/<version>/...` (e.g. `bin/php/php-8.3/php-cgi.exe`)
+    if let Ok(entries) = std::fs::read_dir(&portable_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                for name in binary_names {
+                    if let Some(candidate) = check_file(path.join(name)) {
+                        return Some(candidate);
+                    }
+                    if let Some(candidate) = check_file(path.join("bin").join(name)) {
+                        return Some(candidate);
+                    }
+                }
             }
         }
     }
@@ -133,17 +156,8 @@ pub fn resolve_binary(
     // Also check directly under `bin/`
     let bin_dir = base_dir.join("bin");
     for name in binary_names {
-        let candidate = bin_dir.join(name);
-        if candidate.is_file() {
+        if let Some(candidate) = check_file(bin_dir.join(name)) {
             return Some(candidate);
-        }
-        #[cfg(windows)]
-        {
-            let exe_name = format!("{}.exe", name);
-            let candidate_exe = bin_dir.join(exe_name);
-            if candidate_exe.is_file() {
-                return Some(candidate_exe);
-            }
         }
     }
 
@@ -176,5 +190,49 @@ mod which {
             }
         }
         Err(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_resolve_binary_nested_and_versioned() {
+        let temp_dir = std::env::temp_dir().join(format!("bamp_platform_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        // 1. Direct in bin/<service>/
+        let nginx_bin = temp_dir.join("bin/nginx");
+        fs::create_dir_all(&nginx_bin).unwrap();
+        fs::write(nginx_bin.join("nginx.exe"), "dummy").unwrap();
+
+        assert_eq!(
+            resolve_binary(&temp_dir, "nginx", &["nginx"]).unwrap(),
+            nginx_bin.join("nginx.exe")
+        );
+
+        // 2. Nested in bin/<service>/bin/ (MariaDB / Apache style)
+        let mysql_bin = temp_dir.join("bin/mysql/bin");
+        fs::create_dir_all(&mysql_bin).unwrap();
+        fs::write(mysql_bin.join("mariadbd.exe"), "dummy").unwrap();
+
+        assert_eq!(
+            resolve_binary(&temp_dir, "mysql", &["mariadbd", "mysqld"]).unwrap(),
+            mysql_bin.join("mariadbd.exe")
+        );
+
+        // 3. Versioned in bin/<service>/<version>/ (PHP style)
+        let php_ver_bin = temp_dir.join("bin/php/php-8.3");
+        fs::create_dir_all(&php_ver_bin).unwrap();
+        fs::write(php_ver_bin.join("php-cgi.exe"), "dummy").unwrap();
+
+        assert_eq!(
+            resolve_binary(&temp_dir, "php", &["php-cgi", "php-fpm"]).unwrap(),
+            php_ver_bin.join("php-cgi.exe")
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

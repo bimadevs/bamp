@@ -211,6 +211,13 @@ fn install_package(package_id: String) -> Result<String, String> {
     tools::ToolsManager::install_package(&base_dir, &package_id)
 }
 
+#[tauri::command]
+fn download_service_binaries(services: Option<String>) -> Result<String, String> {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let target_services = services.unwrap_or_else(|| "all".to_string());
+    tools::ToolsManager::download_service_binaries(&base_dir, &target_services)
+}
+
 pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let supervisor = Arc::new(ProcessSupervisor::new(base_dir));
@@ -237,15 +244,32 @@ pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
         env: HashMap::new(),
     });
 
-    // Register PHP-FPM default
+    // Register PHP-FPM / FastCGI default
     supervisor.register_service(ServiceDefinition {
         id: "php".to_string(),
-        name: "PHP-FPM".to_string(),
-        binary_candidates: vec!["php-fpm".to_string(), "php-fpm8.3".to_string(), "php-fpm8.2".to_string()],
+        name: "PHP (FastCGI / FPM)".to_string(),
+        binary_candidates: vec![
+            "php-cgi".to_string(),
+            "php-cgi8.3".to_string(),
+            "php".to_string(),
+            "php-fpm".to_string(),
+            "php-fpm8.3".to_string(),
+            "php-fpm8.2".to_string(),
+        ],
         default_port: Some(9000),
-        args: vec!["--fpm-config".to_string(), "data/php/php-fpm.conf".to_string(), "-F".to_string()],
+        args: if cfg!(windows) {
+            vec!["-b".to_string(), "127.0.0.1:9000".to_string()]
+        } else {
+            vec!["--fpm-config".to_string(), "data/php/php-fpm.conf".to_string(), "-F".to_string()]
+        },
         work_dir: None,
-        env: HashMap::new(),
+        env: {
+            let mut env = HashMap::new();
+            if cfg!(windows) {
+                env.insert("PHP_FCGI_MAX_REQUESTS".to_string(), "0".to_string());
+            }
+            env
+        },
     });
 
     // Register MySQL / MariaDB
@@ -254,12 +278,18 @@ pub fn create_default_supervisor() -> Arc<ProcessSupervisor> {
         name: "MySQL / MariaDB".to_string(),
         binary_candidates: vec!["mariadbd".to_string(), "mysqld".to_string()],
         default_port: Some(3306),
-        args: vec![
-            "--defaults-file=data/mysql/my.cnf".to_string(),
-            "--datadir=data/mysql/data".to_string(),
-            "--socket=data/mysql/mysql.sock".to_string(),
-            "--port=3306".to_string(),
-        ],
+        args: {
+            let mut args = vec![
+                "--defaults-file=data/mysql/my.cnf".to_string(),
+                "--datadir=data/mysql/data".to_string(),
+                "--socket=data/mysql/mysql.sock".to_string(),
+                "--port=3306".to_string(),
+            ];
+            if cfg!(windows) {
+                args.push("--console".to_string());
+            }
+            args
+        },
         work_dir: None,
         env: HashMap::new(),
     });
@@ -389,7 +419,8 @@ pub fn run() {
             launch_database_client,
             scaffold_app,
             get_package_hub,
-            install_package
+            install_package,
+            download_service_binaries
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

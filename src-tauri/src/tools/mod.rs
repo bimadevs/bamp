@@ -400,6 +400,53 @@ impl ToolsManager {
 
         Ok(format!("Package {} successfully configured in bin/php/{}.", package_id, package_id))
     }
+
+    /// Download portable service binaries using PowerShell script
+    pub fn download_service_binaries(base_dir: &Path, services: &str) -> Result<String, String> {
+        let script_path = base_dir.join("scripts/install-binaries-win.ps1");
+        if !script_path.is_file() {
+            return Err("install-binaries-win.ps1 not found in scripts/ directory".to_string());
+        }
+
+        let mut cmd = if cfg!(windows) {
+            let mut c = std::process::Command::new("powershell");
+            c.args([
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                &script_path.to_string_lossy(),
+                "-Services",
+                services,
+            ]);
+            c
+        } else {
+            if which::which("pwsh").is_ok() {
+                let mut c = std::process::Command::new("pwsh");
+                c.args([
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    &script_path.to_string_lossy(),
+                    "-Services",
+                    services,
+                ]);
+                c
+            } else {
+                return Err("PowerShell (powershell or pwsh) is required to run the automated installer script".to_string());
+            }
+        };
+
+        cmd.current_dir(base_dir);
+        let output = cmd.output().map_err(|e| format!("Failed to run installer script: {}", e))?;
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Ok(stdout.to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Err(format!("Installer script failed:\n{}\n{}", stdout, stderr))
+        }
+    }
 }
 
 mod which {

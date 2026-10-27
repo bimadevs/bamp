@@ -261,12 +261,37 @@ impl ProcessSupervisor {
 
         // 5. Spawn process with isolation
         let mut cmd = Command::new(&binary_path);
-        cmd.args(&def.args);
+
+        // Dynamic arguments adaptation:
+        // If service is PHP and resolved binary is php-cgi or php executable (e.g. Windows PHP)
+        let is_php_cgi = id == "php" && binary_path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .map(|s| s.contains("php-cgi") || s == "php" || s == "php.exe")
+            .unwrap_or(false);
+
+        let final_args: Vec<String> = if is_php_cgi {
+            let port = def.default_port.unwrap_or(9000);
+            let mut args = vec!["-b".to_string(), format!("127.0.0.1:{}", port)];
+            let php_ini = self.base_dir.join("data/php/php.ini");
+            if php_ini.is_file() {
+                args.push("-c".to_string());
+                args.push(php_ini.to_string_lossy().to_string());
+            }
+            args
+        } else {
+            def.args.clone()
+        };
+
+        cmd.args(&final_args);
         if let Some(ref work_dir) = def.work_dir {
             cmd.current_dir(work_dir);
         }
         for (k, v) in &def.env {
             cmd.env(k, v);
+        }
+        if is_php_cgi {
+            cmd.env("PHP_FCGI_MAX_REQUESTS", "0");
         }
 
         configure_process_isolation(&mut cmd);

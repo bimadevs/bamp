@@ -26,6 +26,8 @@ import {
   Check,
   X,
   Globe,
+  Download,
+  Loader2,
 } from "lucide-react";
 import "./App.css";
 
@@ -122,6 +124,7 @@ export default function App() {
 
   // Package Hub State
   const [packages, setPackages] = useState<PackageInfo[]>([]);
+  const [downloadingBinaries, setDownloadingBinaries] = useState(false);
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -472,6 +475,27 @@ export default function App() {
     }
   };
 
+  // Automated Windows Binaries Downloader
+  const handleDownloadBinaries = async (services = "all") => {
+    try {
+      setDownloadingBinaries(true);
+      showToast(`Downloading service binaries (${services})... Check logs for details.`);
+      addLog("binaries", `Starting automated binary download for services: ${services}`, "info");
+      const res = await invoke<string>("download_service_binaries", { services });
+      showToast("Service binaries installed successfully!");
+      addLog("binaries", res, "info");
+      await fetchStatus();
+      await fetchPackageHub();
+      await fetchPhpVersions();
+    } catch (err: unknown) {
+      const errMsg = String(err);
+      showToast(`Download failed: ${errMsg}`);
+      addLog("binaries", `Download failed: ${errMsg}`, "error");
+    } finally {
+      setDownloadingBinaries(false);
+    }
+  };
+
   const filteredSites = useMemo(() => {
     if (!searchQuery) return sites;
     const q = searchQuery.toLowerCase();
@@ -749,9 +773,30 @@ export default function App() {
 
                   {/* Conflict / Error Diagnostics */}
                   {service.error && (
-                    <div className="mt-3 p-2 text-[11px] rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 flex items-start gap-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                      <span>{service.error}</span>
+                    <div className="mt-3 p-2 text-[11px] rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 flex flex-col gap-2">
+                      <div className="flex items-start gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                        <span>{service.error}</span>
+                      </div>
+                      {service.error.includes("not found in bin/") && (
+                        <button
+                          onClick={() => handleDownloadBinaries(service.id)}
+                          disabled={downloadingBinaries}
+                          className="self-start px-2 py-1 text-[10px] font-medium bg-rose-600/30 hover:bg-rose-600/50 text-white border border-rose-500/40 rounded flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                        >
+                          {downloadingBinaries ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>Downloading...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-3 h-3" />
+                              <span>Download {service.name} Binary</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -1184,6 +1229,31 @@ export default function App() {
             <p className="text-xs text-[var(--color-text-muted)] m-0">
               Manage portable PHP binaries in <code className="text-white">bin/php/</code>. You can install pre-configured wrappers or drop in your own custom compiled builds.
             </p>
+
+            {/* 1-Click All Binaries Setup */}
+            <div className="flex items-center justify-between p-3 rounded-lg border border-purple-500/30 bg-purple-950/20">
+              <div>
+                <span className="text-xs font-semibold text-purple-200 block">Download All Windows Binaries</span>
+                <span className="text-[11px] text-zinc-400">Installs Nginx, Apache, PHP 8.3, MariaDB, and Mailpit to bin/</span>
+              </div>
+              <button
+                onClick={() => handleDownloadBinaries("all")}
+                disabled={downloadingBinaries}
+                className="px-3 py-1.5 text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 rounded transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {downloadingBinaries ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Downloading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download All</span>
+                  </>
+                )}
+              </button>
+            </div>
 
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {packages.map((pkg) => (
