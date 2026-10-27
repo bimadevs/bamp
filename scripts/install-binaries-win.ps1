@@ -53,6 +53,7 @@ function Download-And-Extract {
         [string]$Url,
         [string]$ZipName,
         [string]$DestinationDir,
+        [string]$Referer = "",
         [scriptblock]$PostExtract
     )
 
@@ -68,10 +69,32 @@ function Download-And-Extract {
     Write-Host "Downloading $Name from $Url ..." -ForegroundColor Cyan
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
     
-    # Use WebClient for progress feedback
+    # Use WebClient with standard browser User-Agent and optional Referer
     $webClient = New-Object System.Net.WebClient
-    $webClient.Headers.Add("User-Agent", "BAMP-Installer/1.0 (Windows NT 10.0; Win64; x64)")
+    $webClient.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    $webClient.Headers.Add("Accept", "*/*")
+    if ($Referer -ne "") {
+        $webClient.Headers.Add("Referer", $Referer)
+    }
     $webClient.DownloadFile($Url, $ZipPath)
+
+    # Validate ZIP integrity (Magic Bytes PK\x03\x04 and minimum size)
+    $fileInfo = Get-Item $ZipPath
+    if ($fileInfo.Length -lt 100000) {
+        $sample = [System.IO.File]::ReadAllText($ZipPath)
+        if ($sample -like "*<html*") {
+            throw "Downloaded $Name ($ZipName) is an HTML error page instead of a ZIP archive. Response: $sample"
+        }
+        throw "Downloaded $Name ($ZipName) is too small ($($fileInfo.Length) bytes) to be a valid ZIP archive."
+    }
+
+    $stream = [System.IO.File]::OpenRead($ZipPath)
+    $header = New-Object byte[] 4
+    $bytesRead = $stream.Read($header, 0, 4)
+    $stream.Close()
+    if ($bytesRead -lt 4 -or $header[0] -ne 0x50 -or $header[1] -ne 0x4B) {
+        throw "Downloaded file $ZipName is corrupted (magic bytes PK not found)."
+    }
 
     Write-Host "Extracting $ZipName..." -ForegroundColor Cyan
     if (Test-Path $ExtractTemp) { Remove-Item -Recurse -Force $ExtractTemp }
@@ -122,10 +145,24 @@ if ($TargetList -contains "apache") {
     if ((Test-Path $ApacheExe) -and (-not $Force)) {
         Write-Host "`n[SKIP] Apache HTTPD already present at $ApacheExe" -ForegroundColor DarkGray
     } else {
+        # Dynamically resolve latest Apache Lounge zip with reliable fallback
+        $apacheUrl = "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
+        try {
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            $html = $wc.DownloadString("https://www.apachelounge.com/download/VS17/")
+            if ($html -match 'href="(/download/VS17/binaries/httpd-2\.4\.[^"]+-Win64-VS17\.zip)"') {
+                $apacheUrl = "https://www.apachelounge.com" + $matches[1]
+            }
+        } catch {
+            Write-Host "Notice: Using fallback Apache Lounge URL: $apacheUrl" -ForegroundColor DarkGray
+        }
+
         Download-And-Extract `
             -Name "Apache HTTPD" `
-            -Url "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.63-250207-win64-VS17.zip" `
+            -Url $apacheUrl `
             -ZipName "httpd.zip" `
+            -Referer "https://www.apachelounge.com/download/VS17/" `
             -DestinationDir $ApacheDir `
             -PostExtract {
                 param($src, $dst)
@@ -149,7 +186,7 @@ if ($TargetList -contains "php") {
     } else {
         Download-And-Extract `
             -Name "PHP 8.3 NTS" `
-            -Url "https://windows.php.net/downloads/releases/php-8.3.17-nts-Win32-vs16-x64.zip" `
+            -Url "https://windows.php.net/downloads/releases/archives/php-8.3.16-nts-Win32-vs16-x64.zip" `
             -ZipName "php83.zip" `
             -DestinationDir $PhpDir `
             -PostExtract {

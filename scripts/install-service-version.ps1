@@ -60,6 +60,7 @@ function Download-And-Extract-Zip {
         [string]$Name,
         [string]$Url,
         [string]$DestinationDir,
+        [string]$Referer = "",
         [scriptblock]$PostExtract
     )
 
@@ -75,8 +76,30 @@ function Download-And-Extract-Zip {
 
     Write-Host "Downloading $Name..." -ForegroundColor Yellow
     $webClient = New-Object System.Net.WebClient
-    $webClient.Headers.Add("User-Agent", "BAMP-Installer/1.0 (Windows NT 10.0; Win64; x64)")
+    $webClient.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    $webClient.Headers.Add("Accept", "*/*")
+    if ($Referer -ne "") {
+        $webClient.Headers.Add("Referer", $Referer)
+    }
     $webClient.DownloadFile($Url, $ZipPath)
+
+    # Validate ZIP integrity
+    $fileInfo = Get-Item $ZipPath
+    if ($fileInfo.Length -lt 100000) {
+        $sample = [System.IO.File]::ReadAllText($ZipPath)
+        if ($sample -like "*<html*") {
+            throw "Downloaded $Name is an HTML error page instead of a ZIP archive. Response: $sample"
+        }
+        throw "Downloaded $Name is too small ($($fileInfo.Length) bytes) to be a valid ZIP archive."
+    }
+
+    $stream = [System.IO.File]::OpenRead($ZipPath)
+    $header = New-Object byte[] 4
+    $bytesRead = $stream.Read($header, 0, 4)
+    $stream.Close()
+    if ($bytesRead -lt 4 -or $header[0] -ne 0x50 -or $header[1] -ne 0x4B) {
+        throw "Downloaded file $ZipName is corrupted (magic bytes PK not found)."
+    }
 
     Write-Host "Extracting package..." -ForegroundColor Yellow
     Expand-Archive -Path $ZipPath -DestinationPath $ExtractTemp -Force
@@ -99,10 +122,10 @@ function Download-And-Extract-Zip {
 # -------------------------------------------------------------
 if ($Service.ToLower() -eq "php") {
     $phpUrlMap = @{
-        "8.4" = "https://windows.php.net/downloads/releases/php-8.4.6-nts-Win32-vs17-x64.zip"
-        "8.3" = "https://windows.php.net/downloads/releases/php-8.3.17-nts-Win32-vs16-x64.zip"
-        "8.2" = "https://windows.php.net/downloads/releases/php-8.2.27-nts-Win32-vs16-x64.zip"
-        "8.1" = "https://windows.php.net/downloads/releases/php-8.1.31-nts-Win32-vs16-x64.zip"
+        "8.4" = "https://windows.php.net/downloads/releases/archives/php-8.4.4-nts-Win32-vs17-x64.zip"
+        "8.3" = "https://windows.php.net/downloads/releases/archives/php-8.3.16-nts-Win32-vs16-x64.zip"
+        "8.2" = "https://windows.php.net/downloads/releases/archives/php-8.2.27-nts-Win32-vs16-x64.zip"
+        "8.1" = "https://windows.php.net/downloads/releases/archives/php-8.1.31-nts-Win32-vs16-x64.zip"
         "7.4" = "https://windows.php.net/downloads/releases/archives/php-7.4.33-nts-Win32-vc15-x64.zip"
     }
 
@@ -150,8 +173,19 @@ if ($Service.ToLower() -eq "php") {
 }
 elseif ($Service.ToLower() -eq "apache") {
     $ApacheDir = Join-Path $BinDir "apache"
-    $ApacheUrl = "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.63-250207-win64-VS17.zip"
-    Download-And-Extract-Zip -Name "Apache HTTPD" -Url $ApacheUrl -DestinationDir $ApacheDir -PostExtract {
+    $ApacheUrl = "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
+    try {
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        $html = $wc.DownloadString("https://www.apachelounge.com/download/VS17/")
+        if ($html -match 'href="(/download/VS17/binaries/httpd-2\.4\.[^"]+-Win64-VS17\.zip)"') {
+            $ApacheUrl = "https://www.apachelounge.com" + $matches[1]
+        }
+    } catch {
+        Write-Host "Notice: Using fallback Apache Lounge URL: $ApacheUrl" -ForegroundColor DarkGray
+    }
+
+    Download-And-Extract-Zip -Name "Apache HTTPD" -Url $ApacheUrl -Referer "https://www.apachelounge.com/download/VS17/" -DestinationDir $ApacheDir -PostExtract {
         param($src, $dst)
         $sub = Join-Path $src "Apache24"
         if (Test-Path $sub) {
